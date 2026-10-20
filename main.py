@@ -86,8 +86,80 @@ full_df["시도명"] = full_df["시도명"].fillna("미분류")
 full_df["시군구명"] = full_df["시군구명"].fillna("")
 full_df["지역명"] = (full_df["시도명"] + " " + full_df["시군구명"]).str.strip()
 
+# --- [전국 순위 계산] ---
+full_df["전국순위"] = (
+    full_df["고령화율"].rank(ascending=False, method="min").astype(int)
+)
+total_regions = len(full_df)
+
+# --- [기능 추가] 우리 동네 검색 및 현실 비유 카드 ---
+st.markdown("---")
+st.subheader("🏫 우리 동네 고령화 체감 체커")
+
+# 시도 및 시군구 선택 드롭다운
+search_col1, search_col2 = st.columns(2)
+
+with search_col1:
+    sido_options = sorted(
+        [s for s in full_df["시도명"].unique() if s != "미분류"]
+    )
+    selected_search_sido = st.selectbox(
+        "📍 시/도 선택", sido_options, key="search_sido"
+    )
+
+with search_col2:
+    sigungu_options = sorted(
+        full_df[full_df["시도명"] == selected_search_sido][
+            "시군구명"
+        ].unique()
+    )
+    selected_search_sigungu = st.selectbox("🏘️ 시/군/구 선택", sigungu_options)
+
+# 선택 지역 데이터 추출
+target_row = full_df[
+    (full_df["시도명"] == selected_search_sido)
+    & (full_df["시군구명"] == selected_search_sigungu)
+].iloc[0]
+
+target_name = target_row["지역명"]
+target_rate = target_row["고령화율"]
+target_rank = target_row["전국순위"]
+target_total_pop = target_row["총인구"]
+
+# 30명 학급 기준 어르신 수 계산
+class_elderly = round(target_rate * 0.3, 1)
+
+# 메트릭 카드로 주요 정보 표시
+m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+m_col1.metric("📍 선택 지역", target_name)
+m_col2.metric("👵 고령화율", f"{target_rate:.2f}%")
+m_col3.metric("🏆 전국 순위", f"{target_rank}위 / {total_regions}개")
+m_col4.metric("👥 총인구수", f"{target_total_pop:,}명")
+
+# 고령화 단계 구분 및 학생 비유 메시지 상자
+if target_rate >= 20.0:
+    st.error(
+        f"🚨 **[{target_name}]은(는) '초고령사회' 단계입니다!**\n\n"
+        f"🏫 **학급으로 비유하자면:** 우리 반 학생이 30명이라면, 그중 **약 {class_elderly}명**이 65세 이상 어르신에 해당합니다. "
+        f"지역 내 어르신 비중이 매우 높아 돌봄 서비스와 시니어 복지 시설이 중요하게 필요한 지역입니다."
+    )
+elif target_rate >= 14.0:
+    st.warning(
+        f"⚠️ **[{target_name}]은(는) '고령사회' 단계입니다.**\n\n"
+        f"🏫 **학급으로 비유하자면:** 우리 반 학생이 30명이라면, 그중 **약 {class_elderly}명**이 65세 이상 어르신에 해당합니다. "
+        f"초고령사회 진입을 앞두고 있어 젊은 세대와 어르신이 함께 공존하는 정책 준비가 활발한 지역입니다."
+    )
+else:
+    st.info(
+        f"ℹ️ **[{target_name}]은(는) '고령화사회/일반' 단계입니다.**\n\n"
+        f"🏫 **학급으로 비유하자면:** 우리 반 학생이 30명이라면, 그중 **약 {class_elderly}명**이 65세 이상 어르신에 해당합니다. "
+        f"상대적으로 청장년층 인구 비중이 높은 편이지만, 향후 고령화 속도에 맞춘 지속적인 관심이 필요합니다."
+    )
+
+st.markdown("---")
+
 # --- [기능 1] 사이드바 시/도 필터링 ---
-st.sidebar.header("🔍 지역 선택")
+st.sidebar.header("🔍 지도 필터링")
 sido_list = ["전국"] + sorted(
     [s for s in full_df["시도명"].unique() if s != "미분류"]
 )
@@ -112,12 +184,14 @@ fig = px.choropleth(
         "총인구": ":,",
         "고령인구": ":,",
         "고령화율": ":.2f",
+        "전국순위": True,
     },
     labels={
         "고령화율": "고령화율(%)",
         "시군구코드": "행정코드",
         "총인구": "총 인구 수",
         "고령인구": "65세 이상 인구",
+        "전국순위": "전국 순위",
     },
 )
 
@@ -180,7 +254,7 @@ with col2:
         texttemplate="%{text:.2f}%", textposition="outside"
     )
     fig_bottom.update_layout(
-        yaxis={"categoryorder": "total descending"},
+        yaxis={"categoryorder": "total ascending"},
         showlegend=False,
         height=300,
         margin={"r": 30, "t": 20, "l": 0, "b": 0},
