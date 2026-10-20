@@ -1,7 +1,7 @@
-import streamlit as st
 import pandas as pd
-import requests
 import plotly.express as px
+import requests
+import streamlit as st
 
 st.set_page_config(page_title="2026 전국 고령화 단계구분도", layout="wide")
 st.title("2026년 전국 시군구별 고령화율(65세 이상 비율) 단계구분도")
@@ -9,29 +9,32 @@ st.title("2026년 전국 시군구별 고령화율(65세 이상 비율) 단계�
 # 1. GeoJSON 로드 (GitHub raw URL)
 GEOJSON_URL = "https://raw.githubusercontent.com/you1104-arch/population/main/sigungu_kr.geojson.txt"
 
+
 @st.cache_data
 def load_geojson():
     res = requests.get(GEOJSON_URL)
     res.raise_for_status()
     return res.json()
 
+
 # 2. 인구 데이터 로드 및 65세 이상 고령화율 계산
 POP_URL = "https://raw.githubusercontent.com/you1104-arch/population/main/population_ts_yearly_gender.zip"
+
 
 @st.cache_data
 def load_and_process_data():
     # 판다스로 압축 zip 내 CSV 직접 로드
     df = pd.read_csv(POP_URL, dtype={"코드": str})
-    
+
     # 2026년 데이터 필터링
     df = df[df["연도"] == 2026].copy()
-    
+
     # 읍면동 코드를 앞 5자리(시군구 코드)로 추출
     df["시군구코드"] = df["코드"].astype(str).str[:5]
-    
+
     # 전체 인구: '계_'로 시작하는 모든 열의 합
     total_cols = [c for c in df.columns if c.startswith("계_")]
-    
+
     # 65세 이상 열: '계_65세' ~ '계_99세' 및 '계_100세 이상'
     elderly_cols = []
     for c in total_cols:
@@ -45,52 +48,85 @@ def load_and_process_data():
                     elderly_cols.append(c)
             except ValueError:
                 pass
-                
+
     # 시군구 단위 인구 합산
     agg_df = df.groupby("시군구코드")[total_cols].sum().reset_index()
     agg_df["총인구"] = agg_df[total_cols].sum(axis=1)
     agg_df["고령인구"] = agg_df[elderly_cols].sum(axis=1)
-    
+
     # 고령화율(%) 계산 (0으로 나누기 방지)
-    agg_df["고령화율"] = (agg_df["고령인구"] / agg_df["총인구"].replace(0, float("nan"))) * 100
+    agg_df["고령화율"] = (
+        agg_df["고령인구"] / agg_df["총인구"].replace(0, float("nan"))
+    ) * 100
     agg_df["고령화율"] = agg_df["고령화율"].round(2)
-    
+
     return agg_df
+
 
 with st.spinner("데이터를 불러오는 중입니다..."):
     geojson_data = load_geojson()
     pop_df = load_and_process_data()
 
-# 3. 단계구분도 시각화 (배경 지도 타일 없이 경계선만 표시)
+# GeoJSON 정보 추출하여 행정구역 이름 매핑 (시도, 시군구)
+geo_properties = []
+for feature in geojson_data["features"]:
+    props = feature["properties"]
+    geo_properties.append(
+        {
+            "시군구코드": str(props.get("코드", "")),
+            "시도명": props.get("시도", ""),
+            "시군구명": props.get("시군구", ""),
+        }
+    )
+geo_df = pd.DataFrame(geo_properties).drop_duplicates(subset=["시군구코드"])
+
+# 데이터 프레임 병합
+full_df = pd.merge(pop_df, geo_df, on="시군구코드", how="left")
+full_df["시도명"] = full_df["시도명"].fillna("미분류")
+full_df["시군구명"] = full_df["시군구명"].fillna("")
+full_df["지역명"] = (full_df["시도명"] + " " + full_df["시군구명"]).str.strip()
+
+# --- [기능 1] 사이드바 시/도 필터링 ---
+st.sidebar.header("🔍 지역 선택")
+sido_list = ["전국"] + sorted(
+    [s for s in full_df["시도명"].unique() if s != "미분류"]
+)
+selected_sido = st.sidebar.selectbox("시/도 선택", sido_list)
+
+if selected_sido != "전국":
+    filtered_df = full_df[full_df["시도명"] == selected_sido].copy()
+else:
+    filtered_df = full_df.copy()
+
+# 3. 단계구분도 시각화
 fig = px.choropleth(
-    pop_df,
+    filtered_df,
     geojson=geojson_data,
     locations="시군구코드",
     featureidkey="properties.코드",
     color="고령화율",
     color_continuous_scale="Reds",
-    hover_name=pop_df["시군구코드"],
-    labels={"고령화율": "고령화율(%)", "시군구코드": "코드"}
+    hover_name="지역명",
+    hover_data={
+        "시군구코드": True,
+        "총인구": ":,",
+        "고령인구": ":,",
+        "고령화율": ":.2f",
+    },
+    labels={
+        "고령화율": "고령화율(%)",
+        "시군구코드": "행정코드",
+        "총인구": "총 인구 수",
+        "고령인구": "65세 이상 인구",
+    },
 )
 
-# GeoJSON의 properties.시군구 속성을 마우스 오버 텍스트에 매핑
-fig.update_traces(
-    customdata=pop_df[["고령화율"]],
-    hovertemplate="<b>%{properties.시도} %{properties.시군구}</b><br>코드: %{properties.코드}<br>고령화율: %{z:.2f}%<extra></extra>"
-)
-
-# 배경 타일 및 투영 영역 설정 (한반도 중심)
-fig.update_geos(
-    fitbounds="locations",
-    visible=False
-)
+# 배경 타일 및 투영 영역 설정
+fig.update_geos(fitbounds="locations", visible=False)
 
 fig.update_layout(
     margin={"r": 0, "t": 30, "l": 0, "b": 0},
-    coloraxis_colorbar=dict(
-        title="고령화율(%)",
-        ticksuffix="%"
-    )
+    coloraxis_colorbar=dict(title="고령화율(%)", ticksuffix="%"),
 )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, use_container_width=
