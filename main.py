@@ -129,4 +129,60 @@ fig.update_layout(
     coloraxis_colorbar=dict(title="고령화율(%)", ticksuffix="%"),
 )
 
-st.plotly_chart(fig, use_container_width=
+st.plotly_chart(fig, use_container_width=True)
+
+# --- [기능 2] Top 5 및 Bottom 5 시군구 막대그래프 ---
+st.markdown("---")
+st.subheader(f"📊 {selected_sido} 기준 고령화율 상위/하위 시군구")
+
+col1, col2 = st.columns(2)
+
+# Top 5 시군구 (고령화율 높은 순)
+with col1:
+    st.markdown("##### 🔴 고령화율 상위 Top 5")
+    top5_df = filtered_df.sort_values(by="고령화율", ascending=False).head(5)
+
+    fig_top = px.bar(
+        top5_df,
+        x="고령화율",
+        y="지역명",
+        orientation="h",
+        text="고령화율",
+        color="고령화율",
+        color_continuous_scale="Reds",
+        labels={"고령화율": "고령화율(%)", "지역명": "지역"},
+    )
+    fig_top.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
+    fig_top.update_layout(
+        yaxis={"categoryorder": "total ascending"},
+        showlegend=False,
+        height=300,
+        margin={"r": 30, "t": 20, "l": 0, "b": 0},
+    )
+    st.plotly_chart(fig_top, use_container_width=True)
+
+# Bottom 5 시군구 (고령화율 낮은 순)
+with col2:
+    st.markdown("##### 🔵 고령화율 하위 Bottom 5")
+    bottom5_df = filtered_df.sort_values(by="고령화율", ascending=True).head(5)
+
+    fig_bottom = px.bar(
+        bottom5_df,
+        x="고령화율",
+        y="지역명",
+        orientation="h",
+        text="고령화율",
+        color="고령화율",
+        color_continuous_scale="Blues_r",
+        labels={"고령화율": "고령화율(%)", "지역명": "지역"},
+    )
+    fig_bottom.update_traces(
+        texttemplate="%{text:.2f}%", textposition="outside"
+    )
+    fig_bottom.update_layout(
+        yaxis={"categoryorder": "total descending"},
+        showlegend=False,
+        height=300,
+        margin={"r": 30, "t": 20, "l": 0, "b": 0},
+    )
+    st.plotly_chart(fig_bottom, use_container_width=True)
